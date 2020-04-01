@@ -138,8 +138,8 @@ def compare_by_phone(conn):
     leads['fi_l'] = leads['f_fio'] + ' ' + leads['i_fio']
     delivery['fi_d'] = delivery['f_buyer'] + ' ' + delivery['i_buyer']
 
-    leads['fi_l'].fillna('-', inplace=True)  # ToDO:123
-    delivery['fi_d'].fillna('-', inplace=True)  # ToDO:123
+    leads['fi_l'].fillna('-', inplace=True)
+    delivery['fi_d'].fillna('-', inplace=True)
 
     r1 = leads['phone'].value_counts().loc[lambda x: x > phone_quantity].index.tolist()
     r2 = delivery['mophone_buyer'].value_counts().loc[lambda x: x > phone_quantity].index.tolist()
