@@ -1,9 +1,14 @@
 import psycopg2
 import pandas as pd
+import numpy as np
 import dask.dataframe as ds
 from difflib import SequenceMatcher
 import datetime
 import Levenshtein
+
+familiya_ = 3
+phone_quantity = 100
+levi_porog = 2
 
 
 def get_conn():
@@ -50,7 +55,7 @@ def get_phone_intersect(conn):
     return records
 
 
-def compare_pd_dk(conn):
+def compare_by_email(conn):
     cursor = conn.cursor()
     a = datetime.datetime.now()
     #   cursor.execute('select * from public.test_delivery ')
@@ -68,7 +73,7 @@ def compare_pd_dk(conn):
     delivery['email'].fillna('-', inplace=True)
     leads['email'].fillna('-', inplace=True)
 
-    leads['fi_l'] = leads['f_fio']+' '+leads['i_fio']
+    leads['fi_l'] = leads['f_fio'] + ' ' + leads['i_fio']
     delivery['fi_d'] = delivery['f_buyer'] + ' ' + delivery['i_buyer']
 
     a = datetime.datetime.now()
@@ -105,9 +110,127 @@ def compare_pd_dk(conn):
     print(len(s2[(s2['i_base_match'] == True) & (s2['f_base_match'] == True)]))
     print(len(s2[(s2['i_base_match'] == True) | (s2['f_base_match'] == True)]))
 
+    a = datetime.datetime.now()
+    s2['f_levi'] = s2.apply(lambda x: f_levi(x), axis=1)
+    print('f_levi delivery = ', datetime.datetime.now() - a)
+    print(s2['f_levi'].value_counts())
 
 
+def compare_by_phone(conn):
+    cursor = conn.cursor()
+    a = datetime.datetime.now()
+    #   cursor.execute('select * from public.test_delivery ')
+    sql1 = "select * from public.test_delivery;"
+    delivery = pd.read_sql_query(sql1, conn)
+    sql2 = "select * from public.test_leads;"
 
+    leads = pd.read_sql_query(sql2, conn)
+    #   print('select = ', datetime.datetime.now() - a)
+    cursor.close()
+
+    leads['phone'].fillna(' ', inplace=True)
+    delivery['mophone_buyer'].fillna(' ', inplace=True)
+    leads['f_fio'].fillna(' ', inplace=True)
+    leads['i_fio'].fillna(' ', inplace=True)
+    delivery['f_buyer'].fillna(' ', inplace=True)
+    delivery['i_buyer'].fillna(' ', inplace=True)
+
+    leads['fi_l'] = leads['f_fio'] + ' ' + leads['i_fio']
+    delivery['fi_d'] = delivery['f_buyer'] + ' ' + delivery['i_buyer']
+
+    leads['fi_l'].fillna('-', inplace=True)  # ToDO:123
+    delivery['fi_d'].fillna('-', inplace=True)  # ToDO:123
+
+    r1 = leads['phone'].value_counts().loc[lambda x: x > phone_quantity].index.tolist()
+    r2 = delivery['mophone_buyer'].value_counts().loc[lambda x: x > phone_quantity].index.tolist()
+
+    r1_lead = []
+    for i in r1:
+        if len(leads[leads['phone'] == i].groupby('f_fio').count()) > familiya_:
+            r1_lead.append(i)
+    r2_delivery = []
+    for i in r2:
+        if len(delivery[delivery['mophone_buyer'] == i].groupby('f_buyer').count()) > familiya_:
+            r2_delivery.append(i)
+
+    delivery_less_phone = delivery[~delivery.mophone_buyer.isin(r2_delivery)]
+    lead_less_phone = leads[~leads.phone.isin(r1_lead)]
+
+    common_phone = np.intersect1d(delivery_less_phone['mophone_buyer'].unique(),
+                                  lead_less_phone['phone'].unique())
+    full_lead_phone_common = lead_less_phone[lead_less_phone['phone'].isin(common_phone)]
+    delivery_phone_common = delivery_less_phone[delivery_less_phone['mophone_buyer'].isin(common_phone)]
+    delivery_phone_common.rename(columns={'mophone_buyer': 'phone'}, inplace=True)
+    print('2', datetime.datetime.now())
+    a = datetime.datetime.now()
+
+    print(len(lead_less_phone))
+    print(len(delivery_less_phone))
+
+    delivery_less_phone.rename(columns={'mophone_buyer': 'phone'}, inplace=True)
+    phone_temp_result = pd.merge(full_lead_phone_common,
+                                 delivery_phone_common,
+                                 how='left', on='phone')
+    print('merge s1 pd= ', datetime.datetime.now() - a)
+
+    a = datetime.datetime.now()
+    phone_temp_result['f_base_match'] = phone_temp_result.apply(
+        lambda x: x['f_fio'] in x['fi_d'].split(), axis=1)
+    print('f_base_match pd= ', datetime.datetime.now() - a)
+
+    a = datetime.datetime.now()
+    phone_temp_result['i_base_match'] = phone_temp_result.apply(
+        lambda x: x['i_fio'] in x['fi_d'].split(), axis=1)
+
+    print('i_base_match pd= ', datetime.datetime.now() - a)
+    print(len(phone_temp_result[phone_temp_result['f_base_match'] == True]))
+    print(len(phone_temp_result[phone_temp_result['i_base_match'] == True]))
+    print(len(phone_temp_result[(phone_temp_result['i_base_match'] == True)
+                                & (phone_temp_result['f_base_match'] == True)]))
+    print(len(phone_temp_result[(phone_temp_result['i_base_match'] == True)
+                                | (phone_temp_result['f_base_match'] == True)]))
+
+    a = datetime.datetime.now()
+    phone_temp_result_delivery = pd.merge(delivery_phone_common,
+                                          full_lead_phone_common,
+                                          how='left', on='phone')
+    print('merge s2 pd= ', datetime.datetime.now() - a)
+
+    a = datetime.datetime.now()
+    phone_temp_result_delivery['f_base_match'] = phone_temp_result_delivery.apply(
+        lambda x: x['f_buyer'] in x['fi_l'].split(), axis=1)
+    print('f_base_match pd= ', datetime.datetime.now() - a)
+    a = datetime.datetime.now()
+    phone_temp_result_delivery['i_base_match'] = phone_temp_result_delivery.apply(
+        lambda x: x['i_buyer'] in x['fi_l'].split(), axis=1)
+    print('i_base_match pd= ', datetime.datetime.now() - a)
+
+    print(len(phone_temp_result_delivery[phone_temp_result_delivery['f_base_match'] == True]))
+    print(len(phone_temp_result_delivery[phone_temp_result_delivery['i_base_match'] == True]))
+    print(len(
+        phone_temp_result_delivery[(phone_temp_result_delivery['i_base_match'] == True)
+                                   & (phone_temp_result_delivery['f_base_match'] == True)]))
+    print(len(
+        phone_temp_result_delivery[(phone_temp_result_delivery['i_base_match'] == True)
+                                   | (phone_temp_result_delivery['f_base_match'] == True)]))
+
+    a = datetime.datetime.now()
+    phone_temp_result['f_levi'] = phone_temp_result.apply(lambda x: f_levi(x), axis=1)
+    print('f_levi lead = ', datetime.datetime.now() - a)
+    print(phone_temp_result['f_levi'].value_counts())
+
+
+def f_levi(x):
+    try:
+        if (x['f_base_match'] == False) and (len(x['f_buyer']) > 3 and len(x['f_fio']) > 3):
+            if Levenshtein.distance(x['f_buyer'], x['f_fio']) < levi_porog:
+                return True
+            else:
+                return False
+        else:
+            return False
+    except:
+        return False
 
 
 if __name__ == '__main__':
@@ -131,5 +254,6 @@ if __name__ == '__main__':
     print(Levenshtein.ratio('иванов', 'ивалов'))
     """
     new_conn = get_conn()
-    compare_pd_dk(new_conn)
+    compare_by_email(new_conn)
+    compare_by_phone(new_conn)
     close_conn(new_conn)
